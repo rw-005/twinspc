@@ -144,6 +144,15 @@ html[data-ui=resto] .pr{font-size:17px;font-weight:700}
 html[data-ui=resto] .pr small,html[data-ui=resto] .pr span{display:none}
 html[data-ui=resto] .chip{border-radius:6px;font-weight:500;font-size:13px;padding:8px 18px}
 html[data-ui=resto] .cart .ord{font-weight:600;font-size:13px}
+@media (min-width:1000px) and (min-height:640px){
+html[data-theme=dark] .shell:not(.wk) .prod .pb b{color:var(--tx)}
+html[data-theme=dark] .shell:not(.wk) .prod .pr{color:var(--mut)}
+html[data-theme=dark] .shell:not(.wk) .prod .ph{background:#1a2440;color:#8fa0c4}
+html[data-theme=dark] .left.railmin>#cats{background:var(--card)}
+html[data-theme=dark] .left.railmin>#cats .chip{color:var(--tx)}
+html[data-theme=dark] .left.railmin>#cats .chip.on{color:var(--pri)}
+html[data-theme=dark] .shell:not(.wk) .payrow #saveBtn,html[data-theme=dark] .shell:not(.wk) .payrow #ordBtn,html[data-theme=dark] .shell:not(.wk) .payrow #kbtn2 .btn{background:var(--card)}
+}
 
 html[data-ui=resto] .tot .gt{padding-bottom:4px}
 html[data-ui=resto] .payrow .btn{border-radius:10px}
@@ -685,7 +694,33 @@ function feesClean(f){
  Object.keys(d.chan).forEach(k=>{const q=(f.chan||{})[k]||{};o.chan[k]={svc:Math.min(100,g(q.svc)),adm:g(q.adm),ship:g(q.ship)}});
  return o;
 }
-function save(){try{localStorage.setItem(KEY,JSON.stringify(db))}catch(e){toast('Penyimpanan penuh! Kurangi foto produk atau ekspor data.')}try{syncSoon()}catch(_){}}
+/* Produk dalam jumlah besar disimpan di IndexedDB (batas jauh lebih besar dari localStorage ±5 MB). Toko kecil tetap memakai localStorage. */
+const PIDB={db:null,ok:false,dirty:false,t:0};
+function pidbOpen(){return new Promise(res=>{try{const r=indexedDB.open('twinspos_prod',1);r.onupgradeneeded=()=>{try{r.result.createObjectStore('kv')}catch(_){}};r.onsuccess=()=>res(r.result);r.onerror=()=>res(null);r.onblocked=()=>res(null)}catch(e){res(null)}})}
+function pidbGet(){return new Promise(res=>{try{const q=PIDB.db.transaction('kv').objectStore('kv').get('products');q.onsuccess=()=>res(q.result===undefined?null:q.result);q.onerror=()=>res(undefined)}catch(e){res(undefined)}})}
+function pidbPut(arr){return new Promise(res=>{try{const tx=PIDB.db.transaction('kv','readwrite');tx.objectStore('kv').put(arr,'products');tx.oncomplete=()=>res(true);tx.onerror=()=>res(false);tx.onabort=()=>res(false)}catch(e){res(false)}})}
+async function pidbFlush(){clearTimeout(PIDB.t);PIDB.t=0;if(!PIDB.ok||!PIDB.dirty)return;if(PIDB.busy){PIDB.again=true;return}PIDB.busy=true;PIDB.dirty=false;let ok=false;try{ok=await pidbPut(db.products)}catch(_){}PIDB.busy=false;if(!ok){PIDB.ok=false;try{save()}catch(_){}return}if(PIDB.again||PIDB.dirty){PIDB.again=false;pidbFlush()}}
+async function pidbBoot(){
+ try{
+  if(!window.indexedDB)return;
+  PIDB.db=await pidbOpen();if(!PIDB.db)return;
+  if(db.pidb===1){
+   const st=await pidbGet();
+   if(Array.isArray(st)){db.products=st;PIDB.ok=true}
+   else{db.pidb=0;db.products=[];try{toast('Data produk di perangkat ini hilang, ambil ulang lewat Sinkronisasi')}catch(_){}}
+  }else if((db.products||[]).length>=2000){
+   if(await pidbPut(db.products)){PIDB.ok=true;save()}
+  }
+ }catch(e){PIDB.ok=false}
+}
+try{addEventListener('pagehide',()=>{pidbFlush()});document.addEventListener('visibilitychange',()=>{if(document.hidden)pidbFlush()})}catch(_){}
+function save(){
+ try{
+  if(PIDB.ok){const o=Object.assign({},db);o.products=[];o.pidb=1;localStorage.setItem(KEY,JSON.stringify(o));PIDB.dirty=true;if(!PIDB.t)PIDB.t=setTimeout(pidbFlush,20)}
+  else{delete db.pidb;localStorage.setItem(KEY,JSON.stringify(db))}
+ }catch(e){toast('Penyimpanan penuh! Kurangi foto produk atau ekspor data.')}
+ try{syncSoon()}catch(_){}
+}
 const S={user:null,shift:null,cart:[],manual:{type:'pct',val:0},voucher:'',pts:0,cat:'Semua',q:'',view:'pos',type:'take',table:'',cust:'',orderId:null,pesananId:null,custId:'',servers:[],meja:false,channel:'',pmode:'grid',lastPm:'grid'};
 S.navOpen=(()=>{try{const v=localStorage.getItem('twinspos_nav');if(v!==null)return v==='1'}catch(e){}if(window.innerWidth>=1000&&window.innerHeight>=640)return false;return !(window.innerWidth<=800&&window.innerHeight>window.innerWidth)})();
 function toggleNav(){S.navOpen=!S.navOpen;try{localStorage.setItem('twinspos_nav',S.navOpen?'1':'0')}catch(e){}const b=document.querySelector('.shell .body');if(b)b.classList.toggle('navc',!S.navOpen)}
@@ -835,7 +870,11 @@ function promoLive(x){
  if(x.tStart&&x.tEnd&&x.tStart!==x.tEnd){const ok=x.tStart<x.tEnd?(t>=x.tStart&&t<x.tEnd):(t>=x.tStart||t<x.tEnd);if(!ok)return false}
  return true;
 }
+function exTxt(x){const n=((x.exProd||[]).length)+((x.exCat||[]).length);return n?' · kecuali '+n:''}
 function activePromos(){return(db.promos||[]).filter(x=>(x.kind||'auto')==='auto'&&promoLive(x))}
+function promoEx(x,l){return(Array.isArray(x.exProd)&&x.exProd.indexOf(l.pid)>=0)||(Array.isArray(x.exCat)&&x.exCat.length>0&&x.exCat.indexOf(l.cat||catOf(l.pid))>=0)}
+function elSub(x,items){return Math.round(sum(items,i=>promoEx(x,i)?0:i.qty*i.price))}
+function elBase(x,items,rem,cap){let b=0;items.forEach((l,k)=>{if(!promoEx(x,l))b+=rem[k]});return Math.max(0,Math.min(b,cap))}
 function promoCut(x,base,qty){
  let v=x.type==='percent'?base*(+x.value||0)/100:(+x.value||0)*(x.scope==='all'||!x.scope?1:qty);
  if(+x.maxDisc>0)v=Math.min(v,+x.maxDisc);
@@ -843,13 +882,14 @@ function promoCut(x,base,qty){
 }
 function vchFind(code){code=String(code||'').trim().toUpperCase();return(db.promos||[]).find(x=>x.kind==='voucher'&&String(x.code||'').toUpperCase()===code)}
 function vchUsed(code){code=String(code||'').toUpperCase();return db.tx.filter(t=>t.status!=='void'&&String(t.voucher||'').toUpperCase()===code).length}
-function vchCheck(code,sub){
+function vchCheck(code,sub,items){
  const v=vchFind(code);if(!v)return{err:'Kode voucher tidak ditemukan'};
  if(!v.active)return{err:'Voucher tidak aktif'};
  const n=dayKey(new Date());
  if(v.start&&n<v.start)return{err:'Voucher belum berlaku (mulai '+v.start+')'};
  if(v.end&&n>v.end)return{err:'Voucher sudah berakhir'};
  if(!promoLive(v))return{err:'Voucher tidak berlaku di hari/jam ini'};
+ if(items&&((v.exProd&&v.exProd.length)||(v.exCat&&v.exCat.length))){sub=elSub(v,items);if(!(sub>0))return{err:'Voucher tidak berlaku untuk produk di keranjang'}}
  if((+v.minBuy||0)>sub)return{err:'Minimal belanja '+rp(v.minBuy)};
  if(+v.quota>0&&vchUsed(v.code)>=+v.quota)return{err:'Kuota voucher sudah habis'};
  return{ok:1,v};
@@ -865,20 +905,20 @@ function calc(items,manual,type,o){
  const rem=items.map(i=>i.qty*i.price),live=activePromos();
  /* 1. promo per produk / kategori (boleh bertumpuk) */
  live.filter(x=>x.scope==='product'||x.scope==='cat').forEach(x=>{
-  if((+x.minBuy||0)>sub)return;
-  const part=items.map((l,k)=>{const hit=x.scope==='product'?l.pid===x.productId:(l.cat||catOf(l.pid))===x.cat;return hit?promoCut(x,rem[k],l.qty):0});
+  if((+x.minBuy||0)>elSub(x,items))return;
+  const part=items.map((l,k)=>{const hit=x.scope==='product'?(Array.isArray(x.productIds)&&x.productIds.length?x.productIds.indexOf(l.pid)>=0:l.pid===x.productId):((l.cat||catOf(l.pid))===x.cat&&!promoEx(x,l));return hit?promoCut(x,rem[k],l.qty):0});
   let v=sum(part,a=>a);if(!(v>0))return;
   if(+x.maxDisc>0&&v>+x.maxDisc){const f=+x.maxDisc/v;part.forEach((a,k)=>part[k]=a*f);v=+x.maxDisc}
   part.forEach((a,k)=>rem[k]-=a);auto+=v;names.push(x.name);
  });
  /* 2. promo per total belanja: hanya satu yang paling menguntungkan */
  let best=null,bv=0;
- live.filter(x=>x.scope==='all'||!x.scope).forEach(x=>{if((+x.minBuy||0)>sub)return;const v=promoCut(x,Math.max(0,sub-auto),qty);if(v>bv){bv=v;best=x}});
+ live.filter(x=>x.scope==='all'||!x.scope).forEach(x=>{if((+x.minBuy||0)>elSub(x,items))return;const v=promoCut(x,elBase(x,items,rem,Math.max(0,sub-auto)),qty);if(v>bv){bv=v;best=x}});
  if(best){auto+=bv;names.push(best.name)}
  auto=Math.min(Math.round(auto),sub);
  /* 3. voucher */
  let vch=0,vcode='';
- if(!o.nov&&S.voucher){const r=vchCheck(S.voucher,sub);if(r.ok){vch=Math.round(promoCut({...r.v,scope:'all'},Math.max(0,sub-auto),qty));vcode=r.v.code}}
+ if(!o.nov&&S.voucher){const r=vchCheck(S.voucher,sub,items);if(r.ok){vch=Math.round(promoCut({...r.v,scope:'all'},elBase(r.v,items,rem,Math.max(0,sub-auto)),qty));vcode=r.v.code}}
  /* 4. tukar poin */
  let pt=0,ptUsed=0;const L=loyalty(),cu=custOf();
  if(!o.nov&&L&&cu&&S.pts>0){
@@ -905,7 +945,7 @@ function vpModal(){
  const cu=custOf(),L=loyalty(),c=calc(S.cart,S.manual,S.type);
  let h=`<h3>Voucher &amp; Poin</h3>`;
  if((db.promos||[]).some(x=>x.kind==='voucher')){
-  const r=S.voucher?vchCheck(S.voucher,c.sub):null;
+  const r=S.voucher?vchCheck(S.voucher,c.sub,S.cart):null;
   h+=`<label>Kode voucher</label><div style="display:flex;gap:6px"><input id="vp_c" value="${esc(S.voucher)}" placeholder="Masukkan kode" style="flex:1;text-transform:uppercase"><button class="btn pri" onclick="vpApply()">Pakai</button></div>`+
    (S.voucher?`<div class="payl"><span>${r&&r.ok?`<b style="color:var(--ok)">✓ ${esc(r.v.code)}</b> · potongan ${rp(c.vch)}`:`<b style="color:var(--bad)">${esc(r?r.err:'')}</b>`}</span><button class="btn sm" onclick="vpClear()">Lepas</button></div>`:'');
  }
@@ -923,7 +963,7 @@ function vpModal(){
 function vpApply(){
  const code=($('#vp_c').value||'').trim().toUpperCase();
  if(!code){S.voucher='';renderTotals();return vpModal()}
- const r=vchCheck(code,Math.round(sum(S.cart,i=>i.qty*i.price)));
+ const r=vchCheck(code,Math.round(sum(S.cart,i=>i.qty*i.price)),S.cart);
  if(!r.ok){toast(r.err);return}
  S.voucher=r.v.code;renderTotals();toast('Voucher dipakai');vpModal();
 }
@@ -1106,16 +1146,23 @@ function renderCats(){
 }
 function p0ok(p){return !p.bahan&&p.active!==false}
 function bcOf(p){return String((p&&(p.barcode||p.sku))||'')}
+let GL={key:'',n:60,io:null};const GSTEP=60;
+function glMore(total,shown){return shown>=total?'':`<div id="gmore" style="grid-column:1/-1;text-align:center;padding:12px"><button class="btn" onclick="GL.n+=GSTEP;renderGrid()">Tampilkan lebih banyak</button><div style="font-size:12px;opacity:.7;margin-top:6px">Menampilkan ${shown} dari ${total} produk. Ketik nama atau pilih kategori untuk mempersempit.</div></div>`}
+function glWatch(){try{if(GL.io){GL.io.disconnect();GL.io=null}const m=$('#gmore');if(!m||!window.IntersectionObserver)return;GL.io=new IntersectionObserver(e=>{if(e[0].isIntersecting){GL.io.disconnect();GL.n+=GSTEP;renderGrid()}},{rootMargin:'500px'});GL.io.observe(m)}catch(_){}}
 function renderGrid(){
  const el=$('#grid');if(!el)return;
  const q=S.q.trim().toLowerCase();
+ const gk=q+'|'+S.cat+'|'+S.pmode;if(GL.key!==gk){GL.key=gk;GL.n=GSTEP}
  const list=db.products.filter(p=>!p.bahan&&p.active!==false&&(S.cat==='Semua'||p.cat===S.cat)&&(!q||p.name.toLowerCase().includes(q)||bcOf(p).includes(q)||(p.units||[]).some(u=>u.bc&&String(u.bc).includes(q))));
  const sku=S.pmode==='sku';el.className=(sku&&list.length)?'skul':'grid';
- if(sku&&list.length){el.innerHTML=skuHTML(list);return}
- el.innerHTML=list.length?list.map(p=>{
-  const n=sum(S.cart.filter(x=>x.pid===p.id),x=>x.qty);
+ const total=list.length,vis=list.length>GL.n?list.slice(0,GL.n):list;
+ if(sku&&list.length){el.innerHTML=skuHTML(vis)+glMore(total,vis.length);glWatch();return}
+ const qm={};S.cart.forEach(x=>{qm[x.pid]=(qm[x.pid]||0)+x.qty});
+ el.innerHTML=list.length?vis.map(p=>{
+  const n=qm[p.id]||0;
   const stk=pkIs(p)?(pkAvail(p)<=0?'<span class="stb low">Habis</span>':'<span class="stb rcp">Paket</span>'):p.notrack?((p.recipe||[]).length?'<span class="stb rcp">Resep</span>':''):`<span class="stb ${stkAv(p)<=0||(+p.minStock>0&&stkAv(p)<=+p.minStock)?'low':''}">${stkAv(p)<=0?'Habis':(+p.minStock>0&&stkAv(p)<=+p.minStock?'Menipis · ':'Stok ')+(stkAv(p)<=0?'':fq(stkAv(p)))}</span>`;
-  return `<button class="prod ${n>0?'sel':''}" onclick="addProduct('${p.id}')">${n>0?`<span class="qbadge">${fq(n)}</span>`:''}<div class="ph">${p.photo?`<img src="${p.photo}" alt="">`:esc(ini(p.name))}${stk}</div><div class="pb"><b>${esc(p.name)}</b><div class="pr">${rp(p.price)}<small> /${esc(p.unit)}</small>${optInfo(p)?`<small>${optInfo(p)}</small>`:''}</div></div></button>`}).join(''):'<div class="empty" style="grid-column:1/-1">Produk tidak ditemukan</div>';
+  return `<button class="prod ${n>0?'sel':''}" onclick="addProduct('${p.id}')">${n>0?`<span class="qbadge">${fq(n)}</span>`:''}<div class="ph">${p.photo?`<img src="${p.photo}" alt="">`:esc(ini(p.name))}${stk}</div><div class="pb"><b>${esc(p.name)}</b><div class="pr">${rp(p.price)}<small> /${esc(p.unit)}</small>${optInfo(p)?`<small>${optInfo(p)}</small>`:''}</div></div></button>`}).join('')+glMore(total,vis.length):'<div class="empty" style="grid-column:1/-1">Produk tidak ditemukan</div>';
+ glWatch();
 }
 function scanEnter(){
  const q=S.q.trim();if(!q)return;
@@ -2370,7 +2417,7 @@ function expScreen(){
  const bd=d=>d<0?'<span class="badge r" style="background:var(--bad);color:#fff">Expired</span>':d<=c.warn?'<span class="badge k" style="background:#d98a00;color:#fff">'+(d===0?'Hari ini':d+' hari lagi')+'</span>':'<span class="badge g">Aman</span>';
  const list=rows.length?rows.map(({p,x})=>`<div class="lrow" style="flex-wrap:wrap;gap:8px" data-q="${esc((p.name+' '+(x.b.no||'')).toLowerCase())}"><div class="lmain" style="flex:1 1 100%"><b>${esc(p.name)}</b><small style="display:block">Exp ${expFmt(x.b.exp)}${x.b.no?' · Batch '+esc(x.b.no):''} · Sisa ${fq(x.rem)} ${esc(p.unit)}</small></div><div class="lend">${bd(x.d)}</div><div class="quick" style="margin:0 0 0 auto">${x.d<0?`<button class="btn sm" onclick="expDispose('${p.id}','${x.b.id}')">Buang</button>`:''}<button class="btn sm" onclick="expDel('${p.id}','${x.b.id}')">Hapus</button></div></div>`).join(''):'<div class="mut" style="padding:12px">Belum ada batch yang dicatat.</div>';
  const un=db.products.filter(p=>!p.notrack&&(+p.stock||0)>0&&(+p.stock-sum(expRem(p),x=>x.rem))>0.0005);
- const ulist=un.length?un.map(p=>`<div class="lrow" data-q="${esc(p.name.toLowerCase())}"><div class="lmain"><b>${esc(p.name)}</b><small style="display:block">Belum tercatat expired: ${fq(+(p.stock-sum(expRem(p),x=>x.rem)).toFixed(3))} ${esc(p.unit)}</small></div><div class="quick" style="margin:0"><button class="btn sm" onclick="expBatchForm('${p.id}')">Catat batch</button></div></div>`).join(''):'<div class="mut" style="padding:12px">Semua stok sudah tercatat tanggal expired.</div>';
+ const ulist=un.length?un.slice(0,100).map(p=>`<div class="lrow" data-q="${esc(p.name.toLowerCase())}"><div class="lmain"><b>${esc(p.name)}</b><small style="display:block">Belum tercatat expired: ${fq(+(p.stock-sum(expRem(p),x=>x.rem)).toFixed(3))} ${esc(p.unit)}</small></div><div class="quick" style="margin:0"><button class="btn sm" onclick="expBatchForm('${p.id}')">Catat batch</button></div></div>`).join('')+(un.length>100?`<div class="mut" style="padding:12px;text-align:center">Menampilkan 100 dari ${un.length} produk. Catat batch lewat menu Stok pada produk yang dicari.</div>`:''):'<div class="mut" style="padding:12px">Semua stok sudah tercatat tanggal expired.</div>';
  const lg=(db.expLog||[]).slice(-8).reverse();
  return `<div class="cards"><div class="kpi"><small>Sudah expired</small><b style="color:var(--${n.exp?'bad':'ok'})">${n.exp}</b><small>${n.exp?'Nilai modal '+rp(Math.round(n.val)):'batch'}</small></div><div class="kpi"><small>Akan expired (${c.warn} hari)</small><b style="color:${n.warn?'#d98a00':'inherit'}">${n.warn}</b><small>batch</small></div></div>`
  +card('Daftar Batch','Diurutkan dari yang paling cepat expired. Barang expired tidak dijual dan sebaiknya dibuang.',`<div class="sbox" style="margin-bottom:12px">${ic('search',18)}<input placeholder="Cari produk atau batch…" oninput="filterRows(this.value)"></div><div id="plist">${list}</div>`)
@@ -2566,10 +2613,11 @@ function jasaSave(){
 
 /* ---------- pengaturan ---------- */
 function setModal(tab){
+ PL.on=false;
  const tabs=[['outlet','Profil Outlet','bag'],['sync','Koneksi Online','upload'],['sinkron','Sinkronisasi','sync'],['pelayan','Pesanan Pelayan','user'],['kds','Layar Dapur','clock'],['qr','Pesan via QR','table'],['pajak','Pajak & Meja','table'],['print','Printer & Cetak','printer'],['struk','Desain Struk','printer'],['perangkat','Perangkat','printer'],['online','Ojek Online','cart'],['biaya','Biaya & Komisi','wallet'],['diskon','Diskon','sliders'],['kas','Kategori Kas','wallet'],['staff','Karyawan','user'],['jasa','Status Jasa','clock'],['expset','Expired / Batch','warn'],['simpan','Penyimpanan','upload']].filter(t=>!(t[0]==='sync'&&KT_ON()));
  const st=db.settings,pp=[['58','58 mm'],['80','80 mm']],yn=[[true,'Ya'],[false,'Tidak']];let body='';
  const sv=fn=>`<div class="sv"><button class="btn pri" onclick="${fn}">Simpan Perubahan</button></div>`;
- if(tab==='outlet')body=card('Profil Toko','Tampil pada header dan footer struk · Versi aplikasi: v92-foto-status',`<div class="fg">${fld('Nama toko',`<input id="o_n" value="${esc(st.name)}">`)}${fld('No. WhatsApp',`<input id="o_w" value="${esc(st.wa)}">`)}${fld('Alamat',`<input id="o_a" value="${esc(st.address)}">`,1)}${fld('Catatan footer struk',`<input id="o_f" value="${esc(st.footer)}">`,1)}${fld('Ukuran kertas thermal',`<select id="o_p">${selOpt(st.paper,pp)}</select>`)}</div><div class="quick" style="margin-top:8px"><button class="btn sm" onclick="setModal('struk')">Atur tampilan struk…</button></div>`)+card('Tampilan Perangkat Ini','Berlaku di perangkat ini saja, tidak ikut tersinkron.',`<div class="fg">${fld('Bahasa / Language',`<select onchange="setLangApp(this.value)"><option value="id" ${getLang()==='id'?'selected':''}>Bahasa Indonesia</option><option value="en" ${getLang()==='en'?'selected':''}>English</option></select>`,1)}${fld('Layar HP saat landscape',`<select id="o_land" onchange="setLand(this.value)"><option value="tablet" ${landMode()==='tablet'?'selected':''}>Seperti tablet (kasir dan keranjang berdampingan)</option><option value="compact" ${landMode()==='compact'?'selected':''}>Ringkas (huruf lebih besar, tampilan lebih rapat)</option></select>`,1)}</div>`)+card('Tampilan Kasir','Gaya tampilan dan warna aksen (berlaku langsung, tidak perlu Simpan)',`<div class="fg">${fld('Gaya tampilan',`<select onchange="setUi('uiStyle',this.value)">${selOpt(st.uiStyle==='resto'?'resto':'std',[['std','Standar'],['resto','Resto (kartu foto besar, keranjang bergaya kartu)']])}</select>`)}${fld('Warna aksen',`<select onchange="setUi('uiAccent',this.value)">${selOpt(st.uiAccent||'biru',[['biru','Biru (bawaan)'],['hijau','Hijau stabilo'],['marun','Merah maroon'],['tua','Biru tua'],['putih','Putih (tombol biru tua)']])}</select>`)}</div>`)+card('Foto Menu Lintas Perangkat','Foto diunggah ke Google Drive toko lalu muncul di perangkat lain',`<div class="mut" style="font-size:13px;margin-bottom:8px">${fotoStat()}</div><button class="btn" onclick="fotoNow()">Kirim &amp; ambil foto sekarang</button>`)+sv('saveOutlet()');
+ if(tab==='outlet')body=card('Profil Toko','Tampil pada header dan footer struk · Versi aplikasi: v98-usb',`<div class="fg">${fld('Nama toko',`<input id="o_n" value="${esc(st.name)}">`)}${fld('No. WhatsApp',`<input id="o_w" value="${esc(st.wa)}">`)}${fld('Alamat',`<input id="o_a" value="${esc(st.address)}">`,1)}${fld('Catatan footer struk',`<input id="o_f" value="${esc(st.footer)}">`,1)}${fld('Ukuran kertas thermal',`<select id="o_p">${selOpt(st.paper,pp)}</select>`)}</div><div class="quick" style="margin-top:8px"><button class="btn sm" onclick="setModal('struk')">Atur tampilan struk…</button></div>`)+card('Tampilan Perangkat Ini','Berlaku di perangkat ini saja, tidak ikut tersinkron.',`<div class="fg">${fld('Bahasa / Language',`<select onchange="setLangApp(this.value)"><option value="id" ${getLang()==='id'?'selected':''}>Bahasa Indonesia</option><option value="en" ${getLang()==='en'?'selected':''}>English</option></select>`,1)}${fld('Layar HP saat landscape',`<select id="o_land" onchange="setLand(this.value)"><option value="tablet" ${landMode()==='tablet'?'selected':''}>Seperti tablet (kasir dan keranjang berdampingan)</option><option value="compact" ${landMode()==='compact'?'selected':''}>Ringkas (huruf lebih besar, tampilan lebih rapat)</option></select>`,1)}</div>`)+card('Tampilan Kasir','Gaya tampilan dan warna aksen (berlaku langsung, tidak perlu Simpan)',`<div class="fg">${fld('Gaya tampilan',`<select onchange="setUi('uiStyle',this.value)">${selOpt(st.uiStyle==='resto'?'resto':'std',[['std','Standar'],['resto','Resto (kartu foto besar, keranjang bergaya kartu)']])}</select>`)}${fld('Warna aksen',`<select onchange="setUi('uiAccent',this.value)">${selOpt(st.uiAccent||'biru',[['biru','Biru (bawaan)'],['hijau','Hijau stabilo'],['marun','Merah maroon'],['tua','Biru tua'],['putih','Putih (tombol biru tua)']])}</select>`)}</div>`)+card('Foto Menu Lintas Perangkat','Foto diunggah ke Google Drive toko lalu muncul di perangkat lain',`<div class="mut" style="font-size:13px;margin-bottom:8px">${fotoStat()}</div><button class="btn" onclick="fotoNow()">Kirim &amp; ambil foto sekarang</button>`)+sv('saveOutlet()');
  if(tab==='pajak')body=card('Service Charge &amp; Pajak','Urutan hitung: subtotal − diskon → + service → + pajak',`<div class="fg">${fld('Service charge (%)',`<input id="t_sp" type="number" step="any" min="0" value="${st.servicePct}">`)}${fld('Service berlaku untuk',`<select id="t_sd">${selOpt(st.serviceDineOnly,[['true','Dine In saja'],['false','Semua order']])}</select>`)}${fld('Pajak / PPN (%)',`<input id="t_tp" type="number" step="any" min="0" value="${st.taxPct}">`)}${fld('Mode pajak',`<select id="t_tm">${selOpt(st.taxMode,[['excl','Ditambahkan ke total'],['incl','Sudah termasuk harga']])}</select>`)}</div>`)
   +card('Pembulatan','Pembulatan total pembayaran',`<div class="fg">${fld('Pembulatan ke',`<select id="t_ru">${selOpt(st.roundUnit,[[0,'Tanpa pembulatan'],[100,'Rp100'],[500,'Rp500'],[1000,'Rp1.000']])}</select>`)}${fld('Arah pembulatan',`<select id="t_rm">${selOpt(st.roundMode,[['nearest','Terdekat'],['up','Ke atas'],['down','Ke bawah']])}</select>`)}</div>`)
   +card('Kas Kasir','Uang modal saat buka kasir dan hitung uang saat tutup kasir',fld('Hitung uang kas',`<select id="t_cc">${selOpt(CC(),[['true','Aktif: isi uang modal saat buka, isi total uang tunai saat tutup'],['false','Nonaktif: tanpa uang modal, tutup kasir otomatis PAS']])}</select>`,true)+fld('Login kasir',`<select id="t_lm">${selOpt(LM(),[['tutup','Tetap login sampai Tutup Kasir (tidak diminta PIN lagi walau aplikasi ditutup)'],['ganti','Boleh Ganti Kasir tanpa tutup kasir (shift tetap terbuka, penjualan terpisah per kasir)']])}</select>`,true))
@@ -2585,18 +2633,19 @@ function setModal(tab){
   +card('Checker','Daftar cek kelengkapan pesanan sebelum diserahkan',`<div class="fg">${fld('Fitur checker',`<select id="p_co">${selOpt(P.checker.on,[[true,'Aktif'],[false,'Nonaktif']])}</select>`)}${fld('Judul tiket',`<input id="p_ct" value="${esc(P.checker.title)}">`)}${fld('Ukuran kertas',`<select id="p_cp">${selOpt(P.checker.paper,pp)}</select>`)}${fld('Jumlah salinan',`<input id="p_cc" type="number" min="1" max="5" value="${P.checker.copies}">`)}${fld('Cetak checker otomatis setelah bayar',`<select id="p_ca">${selOpt(P.checker.auto,yn)}</select>`,1)}</div><button class="btn sm" onclick="testPrint('checker')">Tes cetak checker</button>`)
   +card('Saat Simpan Order','Cetak otomatis ketika tombol Simpan Order ditekan (hanya item baru yang belum pernah dicetak)',`<div class="fg">${fld('Cetak dapur',`<select id="p_sk">${selOpt(!!P.kitchen.onSave,yn)}</select>`)}${fld('Cetak bar',`<select id="p_sb">${selOpt(!!P.bar.onSave,yn)}</select>`)}${fld('Cetak checker',`<select id="p_sc">${selOpt(!!P.checker.onSave,yn)}</select>`,1)}</div>`)
   +`<div class="mut" style="font-size:13px;margin:0 2px 16px">Sambungkan printer Bluetooth untuk Struk, Dapur, Bar, dan Checker di tab <b>Perangkat</b>. Bagian yang belum punya printer Bluetooth akan memakai dialog cetak browser.</div>`+sv('savePrint()');}
- if(tab==='perangkat'){const B=window.BT,ds=B?B.devices():[];if(B)setTimeout(()=>B.probeAll(false),0);const _d=desc={receipt:'Struk pembayaran dan Z-Report',kitchen:'Tiket pesanan untuk dapur',bar:'Tiket pesanan untuk bar',checker:'Daftar cek kelengkapan pesanan'};
+ if(tab==='perangkat'){const EXE=!!(window.Capacitor&&Capacitor.getPlatform&&Capacitor.getPlatform()==='electron'),B=window.BT,ds=B?B.devices():[];if(B)setTimeout(()=>B.probeAll(false),0);const _d=desc={receipt:'Struk pembayaran dan Z-Report',kitchen:'Tiket pesanan untuk dapur',bar:'Tiket pesanan untuk bar',checker:'Daftar cek kelengkapan pesanan'};
   body=!B?card('Perangkat','',`<div class="mut">Modul printer belum siap.</div>`):`<div id="btPanel"></div>`
   +(window.FS&&!(window.BT&&BT.native)?card('Layar Penuh','Seperti menekan F11. Browser mewajibkan satu sentuhan/klik dulu, jadi layar penuh aktif saat pertama kali layar disentuh.',`<div class="fg">${fld('Otomatis layar penuh saat dibuka',`<select onchange="FS.setAuto(this.value==='true')">${selOpt(FS.auto(),[[true,'Ya'],[false,'Tidak']])}</select>`)}</div><button class="btn sm" onclick="FS.toggle()">Layar penuh / keluar</button>`):'')
-  +(B.native?card('Mode Aplikasi','Kamu memakai aplikasi TWINS POS. Printer LAN dikirim langsung ke IP printer, dan printer Bluetooth yang sudah dipasangkan tersambung otomatis. Tidak perlu relay.',''):card('Relay LAN (opsional)','Hanya perlu jika ada printer LAN/WiFi. Jalankan relay-printer.js di PC atau mini PC yang satu jaringan dengan printer.',`<div class="fg">${fld('Alamat relay',`<input value="${esc(B.relay())}" placeholder="http://192.168.1.10:9101" onchange="BT.setRelay(this.value)">`,1)}</div><button class="btn sm" onclick="BT.ping()">Cek relay</button>`))
+  +(B.native?card('Mode Aplikasi','Kamu memakai aplikasi TWINS POS. Printer LAN dikirim langsung ke IP printer, dan printer Bluetooth yang sudah dipasangkan tersambung otomatis. Tidak perlu relay.'+(EXE?' Printer USB: pasang drivernya di Windows, lalu pilih metode USB / Bluetooth dan pilih printernya dari daftar.':''),''):card('Relay LAN (opsional)','Hanya perlu jika ada printer LAN/WiFi. Jalankan relay-printer.js di PC atau mini PC yang satu jaringan dengan printer.',`<div class="fg">${fld('Alamat relay',`<input value="${esc(B.relay())}" placeholder="http://192.168.1.10:9101" onchange="BT.setRelay(this.value)">`,1)}</div><button class="btn sm" onclick="BT.ping()">Cek relay</button>`))
   +Object.keys(B.roles).map(r=>{const s=B.state(r),oth=ds.filter(d=>d.id!==s.id);
    const bd=(x,a,b,c)=>x===true?`<span class="badge g">${a}</span>`:x===false?`<span class="badge v">${b}</span>`:`<span class="badge k">${c}</span>`;
-   const badge=s.mode==='bt'?(s.name?bd(s.st,'Tersambung','Terputus','Belum dicek'):`<span class="badge v">Belum diatur</span>`):s.mode==='lan'?(s.ip&&(B.native||B.relay())?bd(s.st,'Tersambung','Tidak terjangkau','Belum dicek'):`<span class="badge v">Belum lengkap</span>`):`<span class="badge v">Browser</span>`;
-   const sub=s.mode==='bt'?(s.name?'Printer Bluetooth':'Belum ada printer dipilih'):s.mode==='lan'?(s.ip?esc(s.ip)+':'+s.port:'IP printer belum diisi'):'Memakai dialog cetak browser';
-   const mode=`<div class="fg" style="margin-top:10px">${fld('Metode cetak',`<select onchange="BT.setMode('${r}',this.value)">${selOpt(s.mode,[['browser','Dialog cetak browser'],['bt','Bluetooth'],['lan','LAN / WiFi']])}</select>`)}</div>`;
+   const badge=s.mode==='bt'?(s.name?bd(s.st,'Tersambung','Terputus','Belum dicek'):`<span class="badge v">Belum diatur</span>`):s.mode==='lan'?(s.ip&&(B.native||B.relay())?bd(s.st,'Tersambung','Tidak terjangkau','Belum dicek'):`<span class="badge v">Belum lengkap</span>`):s.mode==='usb'?(s.usb?bd(s.st,'Tersambung','Tidak terdeteksi','Belum dicek'):`<span class="badge v">Belum diatur</span>`):`<span class="badge v">Browser</span>`;
+   const sub=s.mode==='bt'?(s.name?(EXE?'Printer Windows (USB / Bluetooth)':'Printer Bluetooth'):'Belum ada printer dipilih'):s.mode==='lan'?(s.ip?esc(s.ip)+':'+s.port:'IP printer belum diisi'):s.mode==='usb'?(s.usb?(s.usb.k==='ser'?'Port COM · '+s.usb.baud+' baud':'USB langsung'):'Belum ada printer dipilih'):'Memakai dialog cetak browser';
+   const mode=`<div class="fg" style="margin-top:10px">${fld('Metode cetak',`<select onchange="BT.setMode('${r}',this.value)">${selOpt(s.mode,[['browser','Dialog cetak browser'],['bt',EXE?'USB / Bluetooth (printer Windows)':'Bluetooth'],['lan','LAN / WiFi']].concat(B.native?[]:[['usb','USB (kabel data)']]))}</select>`)}</div>`;
    const inner=s.mode==='bt'?`<div class="quick" style="margin-top:10px"><button class="btn pri sm" onclick="BT.connect('${r}')">${s.name?'Ganti printer':'Pilih printer'}</button>${oth.map(d=>`<button class="btn sm" data-id="${esc(d.id)}" onclick="BT.use('${r}',this.dataset.id)">Pakai ${esc(d.name)}</button>`).join('')}<button class="btn sm" onclick="BT.probe('${r}',true)">Cek sambungan</button><button class="btn sm" onclick="BT.test('${r}')">Tes cetak</button>${s.name?`<button class="btn sm bad" onclick="BT.clear('${r}')">Lepas</button>`:''}</div>`
-    :s.mode==='lan'?`<div class="fg">${fld('IP printer',`<input value="${esc(s.ip)}" placeholder="192.168.1.50" onchange="BT.setLan('${r}','ip',this.value)">`)}${fld('Port',`<input type="number" value="${s.port}" onchange="BT.setLan('${r}','port',this.value)">`)}${fld('Potong kertas otomatis',`<select onchange="BT.setLan('${r}','cut',this.value==='true')">${selOpt(s.cut,[[true,'Ya'],[false,'Tidak']])}</select>`)}</div><div class="quick"><button class="btn sm" onclick="BT.probe('${r}',true)">Cek sambungan</button><button class="btn sm" onclick="BT.test('${r}')">Tes cetak</button></div>`:'';
-   return card(B.roles[r],desc[r],`<div class="lrow"><div class="avatar">${ic('printer',18)}</div><div class="lmain"><b>${s.mode==='bt'&&s.name?esc(s.name):'Metode: '+({browser:'Browser',bt:'Bluetooth',lan:'LAN / WiFi'}[s.mode])}</b><div class="mut">${sub}</div></div>${badge}</div>${mode}${inner}`)}).join('')
+    :s.mode==='lan'?`<div class="fg">${fld('IP printer',`<input value="${esc(s.ip)}" placeholder="192.168.1.50" onchange="BT.setLan('${r}','ip',this.value)">`)}${fld('Port',`<input type="number" value="${s.port}" onchange="BT.setLan('${r}','port',this.value)">`)}${fld('Potong kertas otomatis',`<select onchange="BT.setLan('${r}','cut',this.value==='true')">${selOpt(s.cut,[[true,'Ya'],[false,'Tidak']])}</select>`)}</div><div class="quick"><button class="btn sm" onclick="BT.probe('${r}',true)">Cek sambungan</button><button class="btn sm" onclick="BT.test('${r}')">Tes cetak</button></div>`
+    :s.mode==='usb'?`<div class="quick" style="margin-top:10px"><button class="btn pri sm" onclick="BT.usbPick('${r}')">Pilih printer USB</button><button class="btn sm" onclick="BT.serPick('${r}')">Pilih port COM</button><button class="btn sm" onclick="BT.probe('${r}',true)">Cek sambungan</button><button class="btn sm" onclick="BT.test('${r}')">Tes cetak</button>${s.usb?`<button class="btn sm bad" onclick="BT.usbClear('${r}')">Lepas</button>`:''}</div><div class="fg" style="margin-top:8px">${s.usb&&s.usb.k==='ser'?fld('Kecepatan (baud)',`<select onchange="BT.setBaud('${r}',this.value)">${selOpt(s.usb.baud,[[9600,'9600'],[19200,'19200'],[38400,'38400'],[57600,'57600'],[115200,'115200']])}</select>`):''}${fld('Potong kertas otomatis',`<select onchange="BT.setLan('${r}','cut',this.value==='true')">${selOpt(s.cut,[[true,'Ya'],[false,'Tidak']])}</select>`)}</div><div class="mut" style="font-size:12.5px;margin-top:6px">Printer USB biasa yang dipasang lewat driver Windows tidak bisa dibuka langsung. Pakai "Pilih port COM" bila printer muncul sebagai COM, atau "Pilih printer USB" bila drivernya WinUSB. Selain itu pakai dialog cetak browser.</div>`:'';
+   return card(B.roles[r],desc[r],`<div class="lrow"><div class="avatar">${ic('printer',18)}</div><div class="lmain"><b>${s.mode==='bt'&&s.name?esc(s.name):s.mode==='usb'&&s.usb?esc(s.usb.name):'Metode: '+({browser:'Browser',bt:EXE?'USB / Bluetooth':'Bluetooth',lan:'LAN / WiFi',usb:'USB'}[s.mode])}</b><div class="mut">${sub}</div></div>${badge}</div>${mode}${inner}`)}).join('')
   +`<div class="mut" style="font-size:13px;margin:0 2px 16px">Tiap bagian bebas memakai metode berbeda (misalnya Struk lewat Bluetooth, Dapur lewat LAN). Bluetooth (browser): Chrome Android/komputer, printer BLE; di aplikasi, semua printer Bluetooth yang sudah dipasangkan bisa dipakai. LAN: perangkat kasir, relay, dan printer harus satu jaringan, dan printer sebaiknya diberi IP tetap. Jika cetak gagal, otomatis kembali ke dialog cetak browser.</div>`;
  }
  if(tab==='biaya'){const F=feeCfg(),ms=['qris','debit','kredit','transfer','ewallet'];
@@ -2605,18 +2654,18 @@ function setModal(tab){
   +card('Metode Bayar Tambahan','Tambah sendiri, misalnya ShopeePay, OVO, atau Voucher. Potongan dihitung otomatis seperti MDR dan ikut ke laporan. Metode yang dinonaktifkan hilang dari kasir tetapi riwayatnya tetap ada.',(pmxList().length?pmxList().map(x=>`<div class="lrow"><div class="avatar">${ic('wallet',18)}</div><div class="lmain"><b>${esc(x.name)}</b> ${x.active===false?'<span class="badge v">Nonaktif</span>':'<span class="badge g">Aktif</span>'}<div class="mut">Potongan ${fq(x.pct)}%${+x.flat?' + '+rp(x.flat):''} · ${x.kind==='svc'?'komisi platform':'MDR'}</div></div><button class="btn sm" onclick="pmxForm('${x.id}')">Ubah</button></div>`).join(''):'<div class="empty"><div>Belum ada metode tambahan</div></div>')+'<button class="btn pri sm" style="margin-top:10px" onclick="pmxForm()">+ Tambah Metode</button>')
   +`<div class="mut" style="font-size:13px;margin:0 2px 16px">Biaya dihitung otomatis saat transaksi dan ikut mengurangi laba bersih di laporan. Tunai, Kasbon, dan Komplimen tidak dikenai MDR. Pengaturan ini disimpan di perangkat ini, sama seperti pajak.</div>`+sv('saveFees()')}
  if(tab==='online')body=card('Markup berlaku untuk','Pilih produk mana yang kena markup otomatis di bawah',`<select id="o_only">${selOpt(!!st.mkOnly,[[false,'Semua produk (kecuali yang punya harga khusus platform)'],[true,'Hanya produk yang dicentang "Kena markup online"']])}</select><div class="mut" style="font-size:12.5px;margin-top:6px">Harga khusus per platform diisi di form produk dan selalu didahulukan.</div>`)+Object.keys(CH).map(k=>{const c=st.online[k];return card(CH[k],'Markup harga otomatis saat order memakai platform ini',`<div class="fg">${fld('Status',`<select id="o_${k}_on">${selOpt(c.on,[[true,'Aktif'],[false,'Nonaktif']])}</select>`)}${fld('Jenis markup',`<select id="o_${k}_m">${selOpt(c.mode,[['pct','Persen (%)'],['rp','Nominal (Rp) per item']])}</select>`)}${fld('Nilai markup',`<input id="o_${k}_v" type="number" step="any" min="0" value="${c.val}">`)}${fld('Bulatkan harga ke atas',`<select id="o_${k}_r">${selOpt(c.round,[[0,'Tanpa pembulatan'],[100,'Rp100'],[500,'Rp500'],[1000,'Rp1.000']])}</select>`)}</div>`,`<span class="badge g">Rp10.000 → ${rp(mkPrice(10000,k))}</span>`)}).join('')+`<div class="mut" style="font-size:13px;margin:0 2px 16px">Harga yang diubah manual oleh kasir tidak ikut berubah. Service charge hanya berlaku untuk Dine In.</div>`+sv('saveOnline()');
- if(tab==='diskon'){const pl=db.promos||[],sc=x=>x.kind==='voucher'?'Voucher '+esc(x.code||''):x.kind==='loyalty'?'Poin pelanggan':x.scope==='product'?'Produk: '+esc((db.products.find(p=>p.id===x.productId)||{}).name||'-'):x.scope==='cat'?'Kategori '+esc(x.cat||'-'):'Total belanja',vl=x=>x.kind==='loyalty'?'Rp'+num(x.earnPer)+' = 1 poin · 1 poin = '+rp(x.pointValue):(x.type==='percent'?fq(x.value)+'%':rp(x.value))+(+x.minBuy?' · min '+rp(x.minBuy):'');
+ if(tab==='diskon'){const pl=db.promos||[],sc0=x=>x.kind==='voucher'?'Voucher '+esc(x.code||''):x.kind==='loyalty'?'Poin pelanggan':x.scope==='product'?'Produk: '+esc(((x.productIds&&x.productIds.length?x.productIds:[x.productId]).map(id=>(db.products.find(p=>p.id===id)||{}).name).filter(Boolean).slice(0,2).join(', '))||'-')+((x.productIds||[]).length>2?' +'+((x.productIds||[]).length-2)+' lain':''):x.scope==='cat'?'Kategori '+esc(x.cat||'-'):'Total belanja',sc=x=>sc0(x)+exTxt(x),vl=x=>x.kind==='loyalty'?'Rp'+num(x.earnPer)+' = 1 poin · 1 poin = '+rp(x.pointValue):(x.type==='percent'?fq(x.value)+'%':rp(x.value))+(+x.minBuy?' · min '+rp(x.minBuy):'');
   body=card('Diskon, Voucher & Poin','Diatur di Backoffice dan otomatis ikut ke kasir lewat sinkronisasi. Di sini hanya untuk dilihat.',(pl.length?pl.map(x=>`<div class="lrow"><div class="avatar">${x.kind==='voucher'?'🎟':x.kind==='loyalty'?'★':x.type==='percent'?'%':'Rp'}</div><div class="lmain"><b>${esc(x.name||x.code||'')}</b> ${promoLive(x)||(x.kind==='loyalty'&&x.active)?'<span class="badge g">Berlaku</span>':'<span class="badge v">Tidak berlaku</span>'}<div class="mut">${sc(x)} · ${vl(x)}</div></div></div>`).join(''):`<div class="empty">${ic('sliders',34)}<div>Belum ada promo dari Backoffice</div></div>`)+(db.discounts.length?`<div class="mut" style="font-size:12.5px;margin-top:10px">Ada ${db.discounts.length} jadwal diskon lama di perangkat ini yang sudah tidak dipakai. Buat ulang di Backoffice (menu Diskon &amp; Promo).</div>`:''),`<button class="btn pri sm" onclick="syncNow()">${ic('sync',14)} Sinkronkan</button>`)}
  if(tab==='kas')body=card('Kategori Pengeluaran','Pisahkan dengan koma',`<textarea id="k_out" rows="3">${esc(st.cashCats.out.join(', '))}</textarea>`)+card('Kategori Uang Masuk','Pisahkan dengan koma',`<textarea id="k_in" rows="2">${esc(st.cashCats.in.join(', '))}</textarea>`)+sv('saveKas()');
  if(tab==='staff')body=card('Karyawan &amp; Peran','Atur akses dan PIN masing-masing staf',db.staff.map(s=>`<div class="lrow"><div class="avatar">${esc(s.name.slice(0,1).toUpperCase())}</div><div class="lmain"><b>${esc(s.name)}</b> <span class="badge ${s.role==='owner'?'g':s.role==='supervisor'?'k':''}">${ROLES[s.role]}</span></div><div class="lacts"><button class="btn sm" onclick="staffForm('${s.id}')">Ubah / PIN</button><button class="btn sm bad" onclick="delStaff('${s.id}')">${ic('trash',14)}</button></div></div>`).join(''),`<button class="btn pri sm" onclick="staffForm()">${ic('plus',14)} Tambah</button>`);
  if(tab==='menu')body=card('Daftar Menu','Kelola nama, kategori, harga, foto, varian, dan topping. Jumlah stok diatur di menu Stok.',`<div class="sbox" style="margin-bottom:12px">${ic('search',18)}<input placeholder="Cari menu…" oninput="filterRows(this.value)"></div><div class="quick" style="margin-bottom:6px"><button class="btn sm" onclick="$('#imp').click()">${ic('upload',14)} Import Excel/CSV</button><button class="btn sm" onclick="tplProd()">${ic('download',14)} Template</button><button class="btn sm" onclick="exportX('Produk',[window._sheets_stok()])">${ic('download',14)} Ekspor</button></div><input type="file" id="imp" accept=".xlsx,.xls,.csv" style="display:none" onchange="importProd(this.files[0]);this.value=''">
-  <div id="plist">${db.products.filter(p=>!p.bahan).length?db.products.filter(p=>!p.bahan).map(p=>`<div class="lrow" data-q="${esc((p.name+' '+p.cat+' '+(bcOf(p))).toLowerCase())}"><div class="avatar">${p.photo?`<img src="${p.photo}">`:esc(ini(p.name))}</div><div class="lmain"><b>${esc(p.name)}</b><div class="mut">${esc(p.cat)} · ${esc(p.unit)}${p.barcode?' · '+esc(p.barcode):''}${optInfo(p)}</div></div><div class="lval">${rp(p.price)}<small>modal ${rp(p.cogs)} · ${p.notrack?'tanpa stok':'stok dihitung'}${(p.recipe||[]).length?' · resep '+p.recipe.length+' bahan':''}</small></div><div class="lacts"><button class="btn sm" onclick="prodForm('${p.id}')">Ubah</button><button class="btn sm bad" onclick="delProd('${p.id}')">${ic('trash',14)}</button></div></div>`).join(''):`<div class="empty">${ic('grid',34)}<div>Belum ada menu</div></div>`}</div>`,`<button class="btn pri sm" onclick="prodForm()">${ic('plus',14)} Tambah</button>`);
+  <div id="plist">${plSet(db.products.filter(p=>!p.bahan),p=>`<div class="lrow" data-q="${esc((p.name+' '+p.cat+' '+(bcOf(p))).toLowerCase())}"><div class="avatar">${p.photo?`<img src="${p.photo}">`:esc(ini(p.name))}</div><div class="lmain"><b>${esc(p.name)}</b><div class="mut">${esc(p.cat)} · ${esc(p.unit)}${p.barcode?' · '+esc(p.barcode):''}${optInfo(p)}</div></div><div class="lval">${rp(p.price)}<small>modal ${rp(p.cogs)} · ${p.notrack?'tanpa stok':'stok dihitung'}${(p.recipe||[]).length?' · resep '+p.recipe.length+' bahan':''}</small></div><div class="lacts"><button class="btn sm" onclick="prodForm('${p.id}')">Ubah</button><button class="btn sm bad" onclick="delProd('${p.id}')">${ic('trash',14)}</button></div></div>`,`<div class="empty">${ic('grid',34)}<div>Belum ada menu</div></div>`)}</div>`,`<button class="btn pri sm" onclick="prodForm()">${ic('plus',14)} Tambah</button>`);
  if(tab==='stok'){
   const all=db.products.filter(p=>!p.bahan),tr=all.filter(p=>!p.notrack),out=tr.filter(p=>p.stock<=0);
   const F={all:all,trk:tr,out:out,no:all.filter(p=>p.notrack)}[STF.f]||all;
   body=`<div class="cards"><div class="kpi"><small>Produk dihitung</small><b>${tr.length}</b></div><div class="kpi"><small>Stok habis</small><b style="color:var(--${out.length?'bad':'ok'})">${out.length}</b></div><div class="kpi"><small>Nilai stok (modal)</small><b>${rp(sum(tr,p=>Math.max(0,p.stock)*p.cogs))}</b></div></div>`
   +card('Stok Produk','Tambah stok masuk atau koreksi (opname) jumlah stok',`<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px"><button class="btn sm" onclick="gudangMenu()">Gudang${gMulti()?' ('+gList().length+')':''}</button>${gMulti()?'<button class="btn sm pri" onclick="mutasiForm()">Mutasi stok</button>':''}</div><div class="sbox" style="margin-bottom:12px">${ic('search',18)}<input placeholder="Cari produk…" oninput="filterRows(this.value)"></div><div class="tabs" style="padding-top:0">${[['all','Semua'],['trk','Dihitung'],['out','Habis'],['no','Tanpa stok']].map(([k,l])=>`<button class="chip ${STF.f===k?'on':''}" onclick="stkFilter('${k}')">${l}</button>`).join('')}</div>
-  <div id="plist">${F.length?F.map(p=>`<div class="lrow" data-q="${esc((p.name+' '+p.cat+' '+(bcOf(p))).toLowerCase())}"><div class="avatar">${p.photo?`<img src="${p.photo}">`:esc(ini(p.name))}</div><div class="lmain"><b>${esc(p.name)}</b><div class="mut">${esc(p.cat)} · ${esc(p.unit)}</div>${gBreak(p)}</div><div class="lval">${p.notrack?'<span class="mut">Tanpa stok</span>':`<span style="color:var(--${p.stock<=0?'bad':'tx'})">${p.stock<=0?'Habis':fq(p.stock)+' '+esc(p.unit)}</span>`}</div><div class="lacts">${p.notrack?`<button class="btn sm" onclick="stockForm('${p.id}',1)">Aktifkan</button>`:`<button class="btn sm pri" onclick="stockForm('${p.id}')">Atur Stok</button>`}</div></div>`).join(''):`<div class="empty">${ic('grid',34)}<div>Tidak ada produk pada filter ini</div></div>`}</div>`);
+  <div id="plist">${plSet(F,p=>`<div class="lrow" data-q="${esc((p.name+' '+p.cat+' '+(bcOf(p))).toLowerCase())}"><div class="avatar">${p.photo?`<img src="${p.photo}">`:esc(ini(p.name))}</div><div class="lmain"><b>${esc(p.name)}</b><div class="mut">${esc(p.cat)} · ${esc(p.unit)}</div>${gBreak(p)}</div><div class="lval">${p.notrack?'<span class="mut">Tanpa stok</span>':`<span style="color:var(--${p.stock<=0?'bad':'tx'})">${p.stock<=0?'Habis':fq(p.stock)+' '+esc(p.unit)}</span>`}</div><div class="lacts">${p.notrack?`<button class="btn sm" onclick="stockForm('${p.id}',1)">Aktifkan</button>`:`<button class="btn sm pri" onclick="stockForm('${p.id}')">Atur Stok</button>`}</div></div>`,`<div class="empty">${ic('grid',34)}<div>Tidak ada produk pada filter ini</div></div>`)}</div>`);
  }
  if(tab==='bahan'){
   const bl=db.products.filter(p=>p.bahan),tb=bl.filter(p=>!p.notrack),low=tb.filter(p=>p.stock<=(+p.minStock||0)),out=tb.filter(p=>p.stock<=0);
@@ -2639,7 +2688,12 @@ function setModal(tab){
  const nav=(inv?[['menu','Menu','grid'],['stok','Stok','chart'],['bahan','Bahan','box']].concat(expOn()?[['exp','Expired','warn']]:[]):tabs).map(([k,l,i])=>`<button class="sn ${k===tab?'on':''}" onclick="setModal('${k}')">${ic(i,20)}<span>${l}</span></button>`).join('');
  panel(inv?'Produk &amp; Inventory':'Pengaturan',inv?'Kelola menu, harga, dan stok produk':'Atur toko, pajak, printer, dan data master',`<div class="setgrid"><nav class="setnav">${nav}</nav><div class="setmain">${body}</div></div>`);
 }
-function filterRows(v){v=v.toLowerCase();document.querySelectorAll('#plist .lrow').forEach(r=>{r.style.display=r.dataset.q.includes(v)?'':'none'})}
+let PL={on:false,src:[],fn:null,q:'',n:100,empty:''};
+function plHtml(){const q=PL.q.trim().toLowerCase(),L=q?PL.src.filter(p=>(p.name+' '+p.cat+' '+bcOf(p)).toLowerCase().includes(q)):PL.src,v=L.length>PL.n?L.slice(0,PL.n):L;
+ return(v.length?v.map(PL.fn).join(''):(q?'<div class="empty"><div>Tidak ditemukan</div></div>':PL.empty))+(L.length>v.length?`<div style="text-align:center;padding:12px"><button class="btn" onclick="PL.n+=200;plRefresh()">Tampilkan lebih banyak</button><div class="mut" style="font-size:12px;margin-top:6px">Menampilkan ${v.length} dari ${L.length}. Ketik di kolom cari untuk mempersempit.</div></div>`:'')}
+function plSet(src,fn,empty){PL={on:true,src,fn,q:'',n:100,empty};return plHtml()}
+function plRefresh(){const e=$('#plist');if(e)e.innerHTML=plHtml()}
+function filterRows(v){if(PL.on){PL.q=v;PL.n=100;plRefresh();return}v=v.toLowerCase();document.querySelectorAll('#plist .lrow').forEach(r=>{r.style.display=r.dataset.q.includes(v)?'':'none'})}
 window._sheets_stok=()=>sheetDefs(repData()).find(s=>s.label==='Stok');
 function closeSet(){closeModal();if(S.user){const h=$('#hlt');if(h)h.innerHTML=hlHTML();renderNav();renderLeft();renderCart()}}
 function savePrint(){
@@ -3453,7 +3507,7 @@ document.addEventListener('visibilitychange',()=>{if(!document.hidden)syncAuto()
  const live=r=>{
   const m=modeOf(r);
   if(m==='bt'&&!nat())return !!(map[r]&&isOn(map[r].id));   // Bluetooth browser: status GATT nyata
-  const conf=m==='lan'?!!((nat()||cfg.relay)&&(cfg.roles[r]||{}).ip):!!map[r];
+  const conf=m==='lan'?!!((nat()||cfg.relay)&&(cfg.roles[r]||{}).ip):m==='usb'?!!(cfg.roles[r]||{}).usb:!!map[r];
   if(!conf)return false;
   const c=CHK[r];
   return(c&&!c.busy&&Date.now()-c.ts<FRESH*3)?c.ok:null;
@@ -3537,7 +3591,7 @@ document.addEventListener('visibilitychange',()=>{if(!document.hidden)syncAuto()
   if(m&&!Object.values(map).some(x=>x.id===m.id)){const p=pool[m.id];if(p){p.manual=true;try{p.dev.gatt.disconnect()}catch(e){}delete pool[m.id]}}
   refresh();
  }
- const state=role=>{const m=map[role],c=cfg.roles[role]||{};return{id:m?m.id:'',name:m?m.name:'',on:m?isOn(m.id):false,st:live(role),mode:modeOf(role),ip:c.ip||'',port:c.port||9100,cut:c.cut!==false}};
+ const state=role=>{const m=map[role],c=cfg.roles[role]||{};return{id:m?m.id:'',name:m?m.name:'',on:m?isOn(m.id):false,st:live(role),mode:modeOf(role),ip:c.ip||'',port:c.port||9100,cut:c.cut!==false,usb:c.usb||null}};
  const devices=()=>Object.values(pool).map(p=>({id:p.id,name:p.name,on:isOn(p.id)}));
  async function ensure(role){
   const m=map[role];if(!m)return false;
@@ -3592,6 +3646,48 @@ document.addEventListener('visibilitychange',()=>{if(!document.hidden)syncAuto()
   const o=new Uint8Array(parts.reduce((a,p)=>a+p.length,0));let x=0;parts.forEach(p=>{o.set(p,x);x+=p.length});return o;
  }
  const relayURL=()=>cfg.relay.replace(/\/+$/,'');
+ /* ---------- USB langsung (kabel data): WebUSB atau Web Serial (port COM) ---------- */
+ const hx=n=>'0x'+(+n||0).toString(16).padStart(4,'0');
+ const setUsb=(role,u)=>{cfg.roles[role]={...(cfg.roles[role]||{}),usb:u};saveCfg();CHK[role]=null;refresh()};
+ async function usbPick(role){
+  if(nat()){toast('Di aplikasi Android, USB langsung belum didukung. Pakai Bluetooth atau LAN.');return}
+  if(!navigator.usb){toast('Browser/aplikasi ini tidak mendukung WebUSB. Coba "Pilih port COM", atau pakai dialog cetak browser.');return}
+  try{const d=await navigator.usb.requestDevice({filters:[]});setUsb(role,{k:'usb',vid:d.vendorId,pid:d.productId,name:(d.productName||'Printer USB')+' ('+hx(d.vendorId)+':'+hx(d.productId)+')'});toast(ROLES[role]+' → '+(d.productName||'printer USB'))}
+  catch(e){if(!e||e.name!=='NotFoundError')toast('Gagal memilih printer USB: '+((e&&e.message)||e))}
+ }
+ async function serPick(role){
+  if(nat()){toast('Di aplikasi Android, port COM belum didukung. Pakai Bluetooth atau LAN.');return}
+  if(!navigator.serial){toast('Browser/aplikasi ini tidak mendukung Web Serial. Coba "Pilih printer USB", atau pakai dialog cetak browser.');return}
+  try{const pt=await navigator.serial.requestPort(),i=pt.getInfo?pt.getInfo():{};setUsb(role,{k:'ser',vid:i.usbVendorId||0,pid:i.usbProductId||0,name:'Port COM'+(i.usbVendorId?' ('+hx(i.usbVendorId)+':'+hx(i.usbProductId)+')':''),baud:((cfg.roles[role]||{}).usb||{}).baud||9600});toast(ROLES[role]+' → port COM')}
+  catch(e){if(!e||e.name!=='NotFoundError')toast('Gagal memilih port COM: '+((e&&e.message)||e))}
+ }
+ function usbClear(role){const c=cfg.roles[role]||{};delete c.usb;saveCfg();CHK[role]=null;refresh()}
+ function setBaud(role,v){const c=cfg.roles[role]=cfg.roles[role]||{};if(c.usb){c.usb.baud=parseInt(v)||9600;saveCfg();refresh()}}
+ async function usbFind(u){
+  if(u.k==='ser'){if(!navigator.serial)return null;const L=await navigator.serial.getPorts();return L.find(x=>{const i=x.getInfo?x.getInfo():{};return(i.usbVendorId||0)===(u.vid||0)&&(i.usbProductId||0)===(u.pid||0)})||null}
+  if(!navigator.usb)return null;const L=await navigator.usb.getDevices();return L.find(d=>d.vendorId===u.vid&&d.productId===u.pid)||null;
+ }
+ async function usbWriteUsb(d,bytes){
+  if(!d.opened)await d.open();
+  if(d.configuration===null)await d.selectConfiguration(1);
+  let ifc=null,ep=null;
+  for(const i of d.configuration.interfaces){for(const a of i.alternates){const o=(a.endpoints||[]).find(e=>e.direction==='out'&&e.type==='bulk');if(o&&(!ifc||a.interfaceClass===7)){ifc=i;ep=o}}}
+  if(!ep)throw new Error('jalur cetak (endpoint) USB tidak ditemukan');
+  if(!ifc.claimed){try{await d.claimInterface(ifc.interfaceNumber)}catch(e){throw new Error('printer dipakai driver Windows, jadi tidak bisa dibuka langsung. Pasang driver WinUSB (Zadig), atau pakai port COM / dialog cetak browser')}}
+  for(let i=0;i<bytes.length;i+=4096){const r=await d.transferOut(ep.endpointNumber,bytes.subarray(i,i+4096));if(r&&r.status&&r.status!=='ok')throw new Error('USB: '+r.status)}
+ }
+ async function usbWriteSer(pt,bytes,baud){
+  if(!pt.writable){try{await pt.open({baudRate:baud||9600})}catch(e){if(!pt.writable)throw new Error('port COM tidak bisa dibuka (dipakai aplikasi lain?)')}}
+  const w=pt.writable.getWriter();try{await w.write(bytes)}finally{w.releaseLock()}
+ }
+ async function usbSend(role,txt,copies){
+  const c=cfg.roles[role]||{},u=c.usb;
+  if(!u)throw new Error('printer USB belum dipilih');
+  const dev=await usbFind(u);
+  if(!dev)throw new Error('printer USB tidak terdeteksi (colok ulang atau pilih lagi)');
+  const bytes=makeBytes(txt,copies,c.cut!==false);
+  if(u.k==='ser')await usbWriteSer(dev,bytes,u.baud);else await usbWriteUsb(dev,bytes);
+ }
  async function lanSend(role,txt,copies){
   const c=cfg.roles[role]||{};
   if(!c.ip)throw new Error('IP printer belum diisi');
@@ -3632,6 +3728,9 @@ document.addEventListener('visibilitychange',()=>{if(!document.hidden)syncAuto()
      catch(e){throw new Error(e.name==='AbortError'?'relay tidak merespons':e.message==='Failed to fetch'?'relay tidak terjangkau':e.message)}
      finally{clearTimeout(t)}
     }
+   }else if(m==='usb'){
+    const u=c.usb;if(!u)throw new Error('printer USB belum dipilih');
+    if(!(await usbFind(u)))throw new Error('printer USB tidak terdeteksi (colok ulang atau pilih lagi)');
    }else{
     if(!map[role])throw new Error('printer belum dipilih');
     if(nat())await nat().btSend({address:map[role].id,data:b64(PING())});
@@ -3662,6 +3761,11 @@ document.addEventListener('visibilitychange',()=>{if(!document.hidden)syncAuto()
     catch(e){CHK[role]={ok:false,ts:Date.now(),msg:e.message};paint();toast('Cetak LAN '+ROLES[role]+' gagal: '+e.message+' - memakai cetak biasa');rest.push(j)}
     continue;
    }
+   if(mode==='usb'){
+    try{await usbSend(role,j.txt,copies);done.add(ROLES[role]);CHK[role]={ok:true,ts:Date.now()};paint()}
+    catch(e){CHK[role]={ok:false,ts:Date.now(),msg:e.message};paint();toast('Cetak USB '+ROLES[role]+' gagal: '+e.message+' - memakai cetak biasa');rest.push(j)}
+    continue;
+   }
    if(mode!=='bt'||!(await ensure(role))){rest.push(j);continue}
    try{await sendText(role,j.txt,copies);done.add(ROLES[role]);CHK[role]={ok:true,ts:Date.now()};paint()}
    catch(e){CHK[role]={ok:false,ts:Date.now(),msg:e.message};paint();toast('Cetak '+ROLES[role]+' gagal: '+e.message+' - memakai cetak biasa');rest.push(j)}
@@ -3674,11 +3778,12 @@ document.addEventListener('visibilitychange',()=>{if(!document.hidden)syncAuto()
   const txt=[f.c('*** TES PRINTER ***'),f.c(ROLES[role].toUpperCase()),f.hr,f.lr('Waktu',fmtT(Date.now())),f.hr,f.c('Printer terhubung dengan baik')].join('\n');
   const m=modeOf(role);
   if(m==='lan'){try{await lanSend(role,txt,1);toast('Tes terkirim ke '+cfg.roles[role].ip)}catch(e){toast('Tes LAN gagal: '+e.message)}return}
-  if(m!=='bt'){toast('Pilih metode Bluetooth atau LAN dulu.');return}
+  if(m==='usb'){try{await usbSend(role,txt,1);toast('Tes terkirim ke '+((cfg.roles[role].usb||{}).name||'printer USB'))}catch(e){toast('Tes USB gagal: '+e.message)}return}
+  if(m!=='bt'){toast('Pilih metode Bluetooth, LAN, atau USB dulu.');return}
   if(!(await ensure(role))){toast('Printer '+ROLES[role]+' belum tersambung. Pilih printer dulu.');return}
   try{await sendText(role,txt,1);toast('Tes terkirim ke '+map[role].name)}catch(e){toast('Tes gagal: '+e.message)}
  }
- window.BT={back,paint,probe,probeAll,roles:ROLES,state,devices,connect,use,clear,test,setMode,setLan,setRelay,ping,relay:()=>cfg.relay,pick,openBt,native:!!nat()};
+ window.BT={usbPick,serPick,usbClear,setBaud,back,paint,probe,probeAll,roles:ROLES,state,devices,connect,use,clear,test,setMode,setLan,setRelay,ping,relay:()=>cfg.relay,pick,openBt,native:!!nat()};
 })();
 
 /* layar penuh */
@@ -5481,6 +5586,7 @@ async function wSaveCfg(){
 }
 (async()=>{
  try{const n=NAT0();if(n){let ok=false;try{const li=await n.launchInfo();ok=!!(li&&li.restored)}catch(e){ok=false}if(!ok)sessClear()}}catch(e){}
+ await pidbBoot();
  renderApp();
  document.documentElement.classList.add('ready');
  try{if(isW())wStart();else if(lanNeeded())wSrvStart()}catch(e){}
