@@ -714,6 +714,7 @@ async function pidbBoot(){
  }catch(e){PIDB.ok=false}
 }
 try{addEventListener('pagehide',()=>{pidbFlush()});document.addEventListener('visibilitychange',()=>{if(document.hidden)pidbFlush()})}catch(_){}
+function lsDb(){if(PIDB.ok){const o=Object.assign({},db);o.products=[];o.pidb=1;localStorage.setItem(KEY,JSON.stringify(o));PIDB.dirty=true;if(!PIDB.t)PIDB.t=setTimeout(pidbFlush,20)}else{delete db.pidb;localStorage.setItem(KEY,JSON.stringify(db))}}
 function save(){
  try{
   if(PIDB.ok){const o=Object.assign({},db);o.products=[];o.pidb=1;localStorage.setItem(KEY,JSON.stringify(o));PIDB.dirty=true;if(!PIDB.t)PIDB.t=setTimeout(pidbFlush,20)}
@@ -2371,7 +2372,7 @@ function expTick(){
  if(!expOn())return;let ch=false;
  db.products.forEach(p=>{if(expFreeze(p))ch=true});if(ch)save();
  const c=expCount(),day=new Date().toISOString().slice(0,10);
- if((c.exp||c.warn)&&S.user&&db.expToast!==day){db.expToast=day;try{localStorage.setItem(KEY,JSON.stringify(db))}catch(e){}toast((c.exp?c.exp+' batch sudah expired. ':'')+(c.warn?c.warn+' batch akan expired dalam '+expCfg().warn+' hari. ':'')+'Buka Produk > Expired.')}
+ if((c.exp||c.warn)&&S.user&&db.expToast!==day){db.expToast=day;try{lsDb()}catch(e){}toast((c.exp?c.exp+' batch sudah expired. ':'')+(c.warn?c.warn+' batch akan expired dalam '+expCfg().warn+' hari. ':'')+'Buka Produk > Expired.')}
 }
 function expDispose(pid,bid){
  const p=db.products.find(x=>x.id===pid);if(!p)return;const b=(p.bt||[]).find(x=>x.id===bid);if(!b)return;
@@ -2448,7 +2449,7 @@ async function jPush(j){
  return false;
 }
 function jErrTxt(){return /Aksi tidak dikenal|Token salah/.test(JERR)?'Code.gs di Google Sheet belum versi terbaru, jadi link belum bisa menampilkan status.':JERR?'Belum terkirim ke server ('+JERR+'). Akan dicoba lagi otomatis.':''}
-async function jRetry(){if(!jOn()||!syOn()||!(db.jpend||[]).length)return;for(const id of (db.jpend||[]).slice()){const j=(db.jobs||[]).find(x=>x.id===id);if(!j){db.jpend=db.jpend.filter(x=>x!==id);continue}await jPush(j)}try{localStorage.setItem(KEY,JSON.stringify(db))}catch(e){}if(S.view==='jobs'&&!document.querySelector('#modal.on')){try{renderLeft()}catch(e){}}}
+async function jRetry(){if(!jOn()||!syOn()||!(db.jpend||[]).length)return;for(const id of (db.jpend||[]).slice()){const j=(db.jobs||[]).find(x=>x.id===id);if(!j){db.jpend=db.jpend.filter(x=>x!==id);continue}await jPush(j)}try{lsDb()}catch(e){}if(S.view==='jobs'&&!document.querySelector('#modal.on')){try{renderLeft()}catch(e){}}}
 setInterval(()=>{try{jRetry()}catch(e){}},30000);
 function jobList(el){
  const l=db.jobs||[],act=l.filter(j=>!jLast(j)).sort((a,b)=>a.ts-b.ts),rest=l.filter(jLast).sort((a,b)=>b.upd-a.upd).slice(0,15);
@@ -2617,7 +2618,7 @@ function setModal(tab){
  const tabs=[['outlet','Profil Outlet','bag'],['sync','Koneksi Online','upload'],['sinkron','Sinkronisasi','sync'],['pelayan','Pesanan Pelayan','user'],['kds','Layar Dapur','clock'],['qr','Pesan via QR','table'],['pajak','Pajak & Meja','table'],['print','Printer & Cetak','printer'],['struk','Desain Struk','printer'],['perangkat','Perangkat','printer'],['online','Ojek Online','cart'],['biaya','Biaya & Komisi','wallet'],['diskon','Diskon','sliders'],['kas','Kategori Kas','wallet'],['staff','Karyawan','user'],['jasa','Status Jasa','clock'],['expset','Expired / Batch','warn'],['simpan','Penyimpanan','upload']].filter(t=>!(t[0]==='sync'&&KT_ON()));
  const st=db.settings,pp=[['58','58 mm'],['80','80 mm']],yn=[[true,'Ya'],[false,'Tidak']];let body='';
  const sv=fn=>`<div class="sv"><button class="btn pri" onclick="${fn}">Simpan Perubahan</button></div>`;
- if(tab==='outlet')body=card('Profil Toko','Tampil pada header dan footer struk · Versi aplikasi: v98-usb',`<div class="fg">${fld('Nama toko',`<input id="o_n" value="${esc(st.name)}">`)}${fld('No. WhatsApp',`<input id="o_w" value="${esc(st.wa)}">`)}${fld('Alamat',`<input id="o_a" value="${esc(st.address)}">`,1)}${fld('Catatan footer struk',`<input id="o_f" value="${esc(st.footer)}">`,1)}${fld('Ukuran kertas thermal',`<select id="o_p">${selOpt(st.paper,pp)}</select>`)}</div><div class="quick" style="margin-top:8px"><button class="btn sm" onclick="setModal('struk')">Atur tampilan struk…</button></div>`)+card('Tampilan Perangkat Ini','Berlaku di perangkat ini saja, tidak ikut tersinkron.',`<div class="fg">${fld('Bahasa / Language',`<select onchange="setLangApp(this.value)"><option value="id" ${getLang()==='id'?'selected':''}>Bahasa Indonesia</option><option value="en" ${getLang()==='en'?'selected':''}>English</option></select>`,1)}${fld('Layar HP saat landscape',`<select id="o_land" onchange="setLand(this.value)"><option value="tablet" ${landMode()==='tablet'?'selected':''}>Seperti tablet (kasir dan keranjang berdampingan)</option><option value="compact" ${landMode()==='compact'?'selected':''}>Ringkas (huruf lebih besar, tampilan lebih rapat)</option></select>`,1)}</div>`)+card('Tampilan Kasir','Gaya tampilan dan warna aksen (berlaku langsung, tidak perlu Simpan)',`<div class="fg">${fld('Gaya tampilan',`<select onchange="setUi('uiStyle',this.value)">${selOpt(st.uiStyle==='resto'?'resto':'std',[['std','Standar'],['resto','Resto (kartu foto besar, keranjang bergaya kartu)']])}</select>`)}${fld('Warna aksen',`<select onchange="setUi('uiAccent',this.value)">${selOpt(st.uiAccent||'biru',[['biru','Biru (bawaan)'],['hijau','Hijau stabilo'],['marun','Merah maroon'],['tua','Biru tua'],['putih','Putih (tombol biru tua)']])}</select>`)}</div>`)+card('Foto Menu Lintas Perangkat','Foto diunggah ke Google Drive toko lalu muncul di perangkat lain',`<div class="mut" style="font-size:13px;margin-bottom:8px">${fotoStat()}</div><button class="btn" onclick="fotoNow()">Kirim &amp; ambil foto sekarang</button>`)+sv('saveOutlet()');
+ if(tab==='outlet')body=card('Profil Toko','Tampil pada header dan footer struk · Versi aplikasi: v99-idb',`<div class="fg">${fld('Nama toko',`<input id="o_n" value="${esc(st.name)}">`)}${fld('No. WhatsApp',`<input id="o_w" value="${esc(st.wa)}">`)}${fld('Alamat',`<input id="o_a" value="${esc(st.address)}">`,1)}${fld('Catatan footer struk',`<input id="o_f" value="${esc(st.footer)}">`,1)}${fld('Ukuran kertas thermal',`<select id="o_p">${selOpt(st.paper,pp)}</select>`)}</div><div class="quick" style="margin-top:8px"><button class="btn sm" onclick="setModal('struk')">Atur tampilan struk…</button></div>`)+card('Tampilan Perangkat Ini','Berlaku di perangkat ini saja, tidak ikut tersinkron.',`<div class="fg">${fld('Bahasa / Language',`<select onchange="setLangApp(this.value)"><option value="id" ${getLang()==='id'?'selected':''}>Bahasa Indonesia</option><option value="en" ${getLang()==='en'?'selected':''}>English</option></select>`,1)}${fld('Layar HP saat landscape',`<select id="o_land" onchange="setLand(this.value)"><option value="tablet" ${landMode()==='tablet'?'selected':''}>Seperti tablet (kasir dan keranjang berdampingan)</option><option value="compact" ${landMode()==='compact'?'selected':''}>Ringkas (huruf lebih besar, tampilan lebih rapat)</option></select>`,1)}</div>`)+card('Tampilan Kasir','Gaya tampilan dan warna aksen (berlaku langsung, tidak perlu Simpan)',`<div class="fg">${fld('Gaya tampilan',`<select onchange="setUi('uiStyle',this.value)">${selOpt(st.uiStyle==='resto'?'resto':'std',[['std','Standar'],['resto','Resto (kartu foto besar, keranjang bergaya kartu)']])}</select>`)}${fld('Warna aksen',`<select onchange="setUi('uiAccent',this.value)">${selOpt(st.uiAccent||'biru',[['biru','Biru (bawaan)'],['hijau','Hijau stabilo'],['marun','Merah maroon'],['tua','Biru tua'],['putih','Putih (tombol biru tua)']])}</select>`)}</div>`)+card('Foto Menu Lintas Perangkat','Foto diunggah ke Google Drive toko lalu muncul di perangkat lain',`<div class="mut" style="font-size:13px;margin-bottom:8px">${fotoStat()}</div><button class="btn" onclick="fotoNow()">Kirim &amp; ambil foto sekarang</button>`)+sv('saveOutlet()');
  if(tab==='pajak')body=card('Service Charge &amp; Pajak','Urutan hitung: subtotal − diskon → + service → + pajak',`<div class="fg">${fld('Service charge (%)',`<input id="t_sp" type="number" step="any" min="0" value="${st.servicePct}">`)}${fld('Service berlaku untuk',`<select id="t_sd">${selOpt(st.serviceDineOnly,[['true','Dine In saja'],['false','Semua order']])}</select>`)}${fld('Pajak / PPN (%)',`<input id="t_tp" type="number" step="any" min="0" value="${st.taxPct}">`)}${fld('Mode pajak',`<select id="t_tm">${selOpt(st.taxMode,[['excl','Ditambahkan ke total'],['incl','Sudah termasuk harga']])}</select>`)}</div>`)
   +card('Pembulatan','Pembulatan total pembayaran',`<div class="fg">${fld('Pembulatan ke',`<select id="t_ru">${selOpt(st.roundUnit,[[0,'Tanpa pembulatan'],[100,'Rp100'],[500,'Rp500'],[1000,'Rp1.000']])}</select>`)}${fld('Arah pembulatan',`<select id="t_rm">${selOpt(st.roundMode,[['nearest','Terdekat'],['up','Ke atas'],['down','Ke bawah']])}</select>`)}</div>`)
   +card('Kas Kasir','Uang modal saat buka kasir dan hitung uang saat tutup kasir',fld('Hitung uang kas',`<select id="t_cc">${selOpt(CC(),[['true','Aktif: isi uang modal saat buka, isi total uang tunai saat tutup'],['false','Nonaktif: tanpa uang modal, tutup kasir otomatis PAS']])}</select>`,true)+fld('Login kasir',`<select id="t_lm">${selOpt(LM(),[['tutup','Tetap login sampai Tutup Kasir (tidak diminta PIN lagi walau aplikasi ditutup)'],['ganti','Boleh Ganti Kasir tanpa tutup kasir (shift tetap terbuka, penjualan terpisah per kasir)']])}</select>`,true))
@@ -3248,7 +3249,7 @@ async function staffPush(){
  try{
   const res=await fetch(SY.url,{method:'POST',redirect:'follow',headers:{'Content-Type':'text/plain;charset=utf-8'},body:JSON.stringify({token:SY.token,action:'push',dev:SY.dev,heads:{settings:['kunci']},recs:[{t:'settings',id:'staff',ts:Date.now(),row:['staff'],j:JSON.stringify(o)}],dels:[],sdeltas:[]})});
   const r=await res.json();
-  if(r&&r.ok){st.spend=false;try{localStorage.setItem(KEY,JSON.stringify(db))}catch(_){}return true}
+  if(r&&r.ok){st.spend=false;try{lsDb()}catch(_){}return true}
  }catch(e){}
  st.spend=true;return false;
 }
@@ -3283,7 +3284,7 @@ async function outletPush(){
  try{
   const res=await fetch(SY.url,{method:'POST',redirect:'follow',headers:{'Content-Type':'text/plain;charset=utf-8'},body:JSON.stringify({token:SY.token,action:'push',dev:SY.dev,heads:{settings:['kunci']},recs:[{t:'settings',id:'outlet',ts:Date.now(),row:['outlet'],j:JSON.stringify(o)}],dels:[],sdeltas:[]})});
   const r=await res.json();
-  if(r&&r.ok){st.osrv=o;st.opend=false;try{localStorage.setItem(KEY,JSON.stringify(db))}catch(_){}return true}
+  if(r&&r.ok){st.osrv=o;st.opend=false;try{lsDb()}catch(_){}return true}
  }catch(e){}
  st.opend=true;return false;
 }
@@ -3320,7 +3321,7 @@ async function syncPull(){
   if(hasF('karyawan')&&Array.isArray(r.data.employees)){const me=new Map(r.data.employees.filter(o=>o&&o.id).map(o=>[o.id,o])),ge=new Set((r.dels&&r.dels.employees)||[]);const ne=[...me.values()].filter(o=>!ge.has(o.id)).map(o=>({id:o.id,name:o.name,role:o.role||'',active:o.active!==false}));if(JSON.stringify(ne)!==JSON.stringify(db.employees||[])){db.employees=ne;n++}try{renderCart()}catch(_){}}
   ['tx','refunds','shifts','cash'].forEach(k=>db[k].sort((a,b)=>tsOf(k,a)-tsOf(k,b)));
   if(n&&S.user&&S.view==='pos'&&!document.querySelector('.modal,.mback,#modal.on')){try{renderCats();renderGrid()}catch(_){}}
-  try{localStorage.setItem(KEY,JSON.stringify(db))}catch(e){}
+  try{lsDb()}catch(e){}
   SY.pulled=true;SY.last=Date.now();sySave();syProg(100,'Selesai');syStatus('Data semua kasir dimuat '+fmtT(SY.last)+(n?' ('+n+' baru'+(np?', '+np+' produk':'')+')':''));
   return true;
  }catch(e){syStatus('Gagal ambil data online: '+e.message,true);SYP.msg='Gagal mengambil data';syProgPaint();return false}
@@ -3385,7 +3386,7 @@ function arsRun(manual){
  const a=arsList(c.days);let n=0;
  ['tx','refunds','cash','shifts'].forEach(k=>{const ids=new Set(a[k].map(o=>o.id));if(!ids.size)return;db[k]=db[k].filter(o=>!ids.has(o.id));ids.forEach(id=>delete SY.h[k+id]);n+=ids.size});
  db.archLast=Date.now();
- if(n){db.archCut=Math.max(db.archCut||0,a.cut);db.archN=(db.archN||0)+n;sySave();try{localStorage.setItem(KEY,JSON.stringify(db))}catch(e){}}
+ if(n){db.archCut=Math.max(db.archCut||0,a.cut);db.archN=(db.archN||0)+n;sySave();try{lsDb()}catch(e){}}
  if(manual)toast(n?n+' data lama diarsipkan':'Belum ada data yang bisa diarsipkan');
  return n;
 }
@@ -3413,7 +3414,7 @@ const RST_LOC=['tx','refunds','shifts','cash','pesanan','jobs'];
 function rstApply(ts){
  RST_LOC.forEach(k=>{if(!Array.isArray(db[k]))return;const gone=db[k].filter(o=>(tsOf(k,o)||0)<=ts);gone.forEach(o=>{delete SY.h[k+o.id]});db[k]=db[k].filter(o=>(tsOf(k,o)||0)>ts)});
  db.orders=[];db.kds=[];SY.del=SY.del.filter(d=>!RST_LOC.includes(d.split(':')[0]));SY.sd=[];
- db.resetSeen=ts;sySave();try{localStorage.setItem(KEY,JSON.stringify(db))}catch(e){}
+ db.resetSeen=ts;sySave();try{lsDb()}catch(e){}
 }
 function rstCard(){
  if(!S.user||S.user.role!=='owner')return '';
