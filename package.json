@@ -1,0 +1,34 @@
+{
+  "name": "twins-pos-desktop",
+  "version": "1.0.0",
+  "description": "TWINS POS untuk Windows",
+  "main": "main.js",
+  "author": "TWINS POS",
+  "license": "UNLICENSED",
+  "scripts": {
+    "start": "electron .",
+    "dist": "electron-builder --win nsis --x64 --publish never"
+  },
+  "devDependencies": {
+    "electron": "^33.2.0",
+    "electron-builder": "^25.1.8"
+  },
+  "build": {
+    "appId": "id.twins.pos.desktop",
+    "productName": "TWINS POS",
+    "directories": { "output": "dist", "buildResources": "build" },
+    "files": ["main.js", "preload.js", "raw-print.ps1", "app/**/*", "package.json"],
+    "asarUnpack": ["raw-print.ps1"],
+    "win": {
+      "icon": "build/icon.png",
+      "target": [{ "target": "nsis", "arch": ["x64"] }]
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "shortcutName": "TWINS POS"
+    }
+  }
+}
