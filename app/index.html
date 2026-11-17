@@ -2613,7 +2613,7 @@ function jasaSave(){
 
 /* ---------- pengaturan ---------- */
 function setModal(tab){
- PL.on=false;
+ PLST.on=false;
  const tabs=[['outlet','Profil Outlet','bag'],['sync','Koneksi Online','upload'],['sinkron','Sinkronisasi','sync'],['pelayan','Pesanan Pelayan','user'],['kds','Layar Dapur','clock'],['qr','Pesan via QR','table'],['pajak','Pajak & Meja','table'],['print','Printer & Cetak','printer'],['struk','Desain Struk','printer'],['perangkat','Perangkat','printer'],['online','Ojek Online','cart'],['biaya','Biaya & Komisi','wallet'],['diskon','Diskon','sliders'],['kas','Kategori Kas','wallet'],['staff','Karyawan','user'],['jasa','Status Jasa','clock'],['expset','Expired / Batch','warn'],['simpan','Penyimpanan','upload']].filter(t=>!(t[0]==='sync'&&KT_ON()));
  const st=db.settings,pp=[['58','58 mm'],['80','80 mm']],yn=[[true,'Ya'],[false,'Tidak']];let body='';
  const sv=fn=>`<div class="sv"><button class="btn pri" onclick="${fn}">Simpan Perubahan</button></div>`;
@@ -2688,12 +2688,12 @@ function setModal(tab){
  const nav=(inv?[['menu','Menu','grid'],['stok','Stok','chart'],['bahan','Bahan','box']].concat(expOn()?[['exp','Expired','warn']]:[]):tabs).map(([k,l,i])=>`<button class="sn ${k===tab?'on':''}" onclick="setModal('${k}')">${ic(i,20)}<span>${l}</span></button>`).join('');
  panel(inv?'Produk &amp; Inventory':'Pengaturan',inv?'Kelola menu, harga, dan stok produk':'Atur toko, pajak, printer, dan data master',`<div class="setgrid"><nav class="setnav">${nav}</nav><div class="setmain">${body}</div></div>`);
 }
-let PL={on:false,src:[],fn:null,q:'',n:100,empty:''};
-function plHtml(){const q=PL.q.trim().toLowerCase(),L=q?PL.src.filter(p=>(p.name+' '+p.cat+' '+bcOf(p)).toLowerCase().includes(q)):PL.src,v=L.length>PL.n?L.slice(0,PL.n):L;
- return(v.length?v.map(PL.fn).join(''):(q?'<div class="empty"><div>Tidak ditemukan</div></div>':PL.empty))+(L.length>v.length?`<div style="text-align:center;padding:12px"><button class="btn" onclick="PL.n+=200;plRefresh()">Tampilkan lebih banyak</button><div class="mut" style="font-size:12px;margin-top:6px">Menampilkan ${v.length} dari ${L.length}. Ketik di kolom cari untuk mempersempit.</div></div>`:'')}
-function plSet(src,fn,empty){PL={on:true,src,fn,q:'',n:100,empty};return plHtml()}
+let PLST={on:false,src:[],fn:null,q:'',n:100,empty:''};
+function plHtml(){const q=PLST.q.trim().toLowerCase(),L=q?PLST.src.filter(p=>(p.name+' '+p.cat+' '+bcOf(p)).toLowerCase().includes(q)):PLST.src,v=L.length>PLST.n?L.slice(0,PLST.n):L;
+ return(v.length?v.map(PLST.fn).join(''):(q?'<div class="empty"><div>Tidak ditemukan</div></div>':PLST.empty))+(L.length>v.length?`<div style="text-align:center;padding:12px"><button class="btn" onclick="PLST.n+=200;plRefresh()">Tampilkan lebih banyak</button><div class="mut" style="font-size:12px;margin-top:6px">Menampilkan ${v.length} dari ${L.length}. Ketik di kolom cari untuk mempersempit.</div></div>`:'')}
+function plSet(src,fn,empty){PLST={on:true,src,fn,q:'',n:100,empty};return plHtml()}
 function plRefresh(){const e=$('#plist');if(e)e.innerHTML=plHtml()}
-function filterRows(v){if(PL.on){PL.q=v;PL.n=100;plRefresh();return}v=v.toLowerCase();document.querySelectorAll('#plist .lrow').forEach(r=>{r.style.display=r.dataset.q.includes(v)?'':'none'})}
+function filterRows(v){if(PLST.on){PLST.q=v;PLST.n=100;plRefresh();return}v=v.toLowerCase();document.querySelectorAll('#plist .lrow').forEach(r=>{r.style.display=r.dataset.q.includes(v)?'':'none'})}
 window._sheets_stok=()=>sheetDefs(repData()).find(s=>s.label==='Stok');
 function closeSet(){closeModal();if(S.user){const h=$('#hlt');if(h)h.innerHTML=hlHTML();renderNav();renderLeft();renderCart()}}
 function savePrint(){
